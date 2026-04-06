@@ -79,12 +79,16 @@ def main() -> int:
         logger.error("Email sending failed. NOT marking jobs as seen (will retry next run).")
         return 1
 
-    # Step 5: Mark all fetched jobs as seen (not just matched ones)
-    # This prevents re-evaluating rejected jobs on the next run.
-    logger.info("Step 5/5: Marking jobs as seen...")
-    all_job_ids = [job["id"] for job in new_jobs]
-    mark_jobs_as_seen(all_job_ids)
-    logger.info(f"  → {len(all_job_ids)} job IDs added to seen list")
+   # Step 5: Mark jobs as seen
+    # Only mark if AI matching actually worked (matched_jobs > 0).
+    # If the API was down or keys were wrong, we want to retry next run.
+    if matched_jobs:
+        logger.info("Step 5/5: Marking jobs as seen...")
+        all_job_ids = [job["id"] for job in new_jobs]
+        mark_jobs_as_seen(all_job_ids)
+        logger.info(f"  → {len(all_job_ids)} job IDs added to seen list")
+    else:
+        logger.warning("Step 5/5: Skipping — no jobs matched (possible API issue). Will retry next run.")
 
     # Summary
     logger.info("=" * 60)
