@@ -1,0 +1,186 @@
+# ═══════════════════════════════════════
+# JOB HUNTER — Profile Configuration
+# ═══════════════════════════════════════
+# Single source of truth for candidate profile, job priorities,
+# geographic preferences, and system settings.
+# Update this file as skills and goals evolve — no code changes needed.
+
+candidate:
+  name: "Gruskorn"
+  background: "Career changer from accounting (Redovisningsekonom) into IT security"
+  current_learning:
+    - platform: "TryHackMe"
+      skills:
+        - "Nmap"
+        - "FTP enumeration"
+        - "SQL injection"
+        - "Burp Suite"
+        - "XSS"
+        - "IDOR"
+        - "SSRF"
+    - platform: "Intigriti"
+      type: "Bug bounty"
+      handle: "gruskornet0"
+
+  goals:
+    short_term: "SOC Analyst"
+    long_term: "Penetration Tester"
+
+  technical_skills:
+    - "Python"
+    - "GitHub Actions"
+    - "Anthropic Claude API"
+    - "GitHub Secrets management"
+    - "YAML"
+    - "Telegram Bot API"
+    - "SendGrid API"
+
+  automation_projects:
+    - name: "Electricity Price Notifier"
+      stack: "GitHub Actions + ntfy + Python"
+    - name: "Gold Technical Analysis"
+      stack: "yfinance + Claude API + Telegram"
+
+# ═══════════════════════════════════════
+# Job matching priorities
+# ═══════════════════════════════════════
+# AI matcher uses these tiers to classify each job.
+# GOLD/SILVER are included in the email. STRETCH jobs are included
+# with a note. SKIP jobs are excluded entirely.
+
+job_priorities:
+  gold:
+    label: "IT Security"
+    keywords:
+      - "SOC"
+      - "security analyst"
+      - "security engineer"
+      - "blue team"
+      - "red team"
+      - "penetration test"
+      - "pentest"
+      - "cybersecurity"
+      - "cyber security"
+      - "incident response"
+      - "threat intelligence"
+      - "SIEM"
+      - "vulnerability"
+      - "information security"
+      - "infosec"
+  silver:
+    label: "IT General"
+    keywords:
+      - "developer"
+      - "devops"
+      - "sysadmin"
+      - "system administrator"
+      - "automation engineer"
+      - "IT support"
+      - "cloud engineer"
+      - "infrastructure"
+      - "backend"
+      - "scripting"
+      - "site reliability"
+      - "platform engineer"
+  bronze:
+    label: "Stretch — Pentesting"
+    description: "Pentesting roles even if requirements exceed current level"
+    keywords:
+      - "penetration tester"
+      - "offensive security"
+      - "red team operator"
+      - "ethical hacker"
+      - "application security"
+  skip:
+    label: "Non-IT"
+    description: "Accounting, sales, admin, and other non-IT roles"
+
+# ═══════════════════════════════════════
+# Geographic preferences
+# ═══════════════════════════════════════
+
+geography:
+  onsite_hybrid:
+    - "Göteborg"
+    - "Gothenburg"
+    - "Kungsbacka"
+    - "Varberg"
+    - "Mölndal"
+    - "Partille"
+    - "Lerum"
+    - "Borås"
+    - "Kungälv"
+    - "Landvetter"
+  remote:
+    - "Sweden"
+    - "Europe"
+    - "Global"
+    - "Worldwide"
+
+# ═══════════════════════════════════════
+# Job source configuration
+# ═══════════════════════════════════════
+
+sources:
+  jobtech:
+    enabled: true
+    base_url: "https://jobsearch.api.jobtechdev.se"
+    search_endpoint: "/search"
+    description: "Swedish public employment service API — free, no key"
+  remotive:
+    enabled: true
+    base_url: "https://remotive.com/api/remote-jobs"
+    description: "Remote jobs Europe + Global — free, no key"
+  weworkremotely:
+    enabled: true
+    base_url: "https://weworkremotely.com"
+    scrape_categories:
+      - "remote-jobs/devops-sysadmin"
+      - "remote-jobs/programming"
+    description: "Global remote jobs — scraped"
+
+# ═══════════════════════════════════════
+# AI matching settings
+# ═══════════════════════════════════════
+
+ai:
+  model: "claude-sonnet-4-20250514"
+  score_threshold: 4
+  max_jobs_per_run: 50
+  matching_context: |
+    You are evaluating job listings for a career changer moving from
+    accounting into IT security. Key context:
+    - Bug bounty participation on Intigriti = practical security experience
+    - TryHackMe skills (Nmap, Burp Suite, SQLi, XSS, IDOR, SSRF) are real, hands-on skills
+    - Prioritize junior/entry-level roles without strict degree requirements
+    - Automation projects (GitHub Actions, Python, APIs) demonstrate real engineering ability
+    - Include pentesting jobs even if requirements are high — flag as STRETCH
+    - Skip all non-IT jobs entirely (accounting, sales, admin, etc.)
+
+# ═══════════════════════════════════════
+# Email settings
+# ═══════════════════════════════════════
+
+email:
+  subject_prefix: "🔐 Jobbmatch"
+  sections:
+    - flag: "GOLD"
+      emoji: "🥇"
+      heading: "IT-SÄKERHET"
+    - flag: "SILVER"
+      emoji: "🥈"
+      heading: "IT GENERELLT"
+    - flag: "STRETCH"
+      emoji: "🥉"
+      heading: "STRÄCKJOBB — PENTESTING"
+    - flag: "TOUGH"
+      emoji: "⚠️"
+      heading: "TUFF MATCHNING"
+
+# ═══════════════════════════════════════
+# Schedule
+# ═══════════════════════════════════════
+
+schedule:
+  cron_description: "Weekdays at 07:00 CET"
+  timezone: "Europe/Stockholm"

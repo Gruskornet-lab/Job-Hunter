@@ -1,0 +1,21 @@
+# ═══════════════════════════════════════
+# Job Hunter — Python Dependencies
+# ═══════════════════════════════════════
+# Pinned to major versions for stability.
+# Run: pip install -r requirements.txt
+
+# AI matching engine
+anthropic>=0.39.0
+
+# Email delivery
+sendgrid>=6.11.0
+
+# HTML scraping (We Work Remotely)
+beautifulsoup4>=4.12.0
+requests>=2.31.0
+
+# Configuration
+pyyaml>=6.0.1
+
+# HTML email templating
+jinja2>=3.1.0
