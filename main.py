@@ -79,16 +79,18 @@ def main() -> int:
         logger.error("Email sending failed. NOT marking jobs as seen (will retry next run).")
         return 1
 
-   # Step 5: Mark jobs as seen
-    # Only mark if AI matching actually worked (matched_jobs > 0).
-    # If the API was down or keys were wrong, we want to retry next run.
-    if matched_jobs:
-        logger.info("Step 5/5: Marking jobs as seen...")
-        all_job_ids = [job["id"] for job in new_jobs]
-        mark_jobs_as_seen(all_job_ids)
-        logger.info(f"  → {len(all_job_ids)} job IDs added to seen list")
-    else:
-        logger.warning("Step 5/5: Skipping — no jobs matched (possible API issue). Will retry next run.")
+    # Step 5: Mark jobs as seen
+    # FIX: always mark new_jobs as seen after a successful email, not only
+    # when matched_jobs > 0. The previous condition caused jobs that
+    # consistently score below threshold to be re-fetched and re-evaluated
+    # by Claude on every single run, wasting API calls indefinitely.
+    # If the AI returned no results due to a real API outage the email step
+    # above would still have succeeded, but that edge case is acceptable —
+    # it is far less costly than infinite re-evaluation of low-scoring jobs.
+    logger.info("Step 5/5: Marking jobs as seen...")
+    all_job_ids = [job["id"] for job in new_jobs]
+    mark_jobs_as_seen(all_job_ids)
+    logger.info(f"  → {len(all_job_ids)} job IDs added to seen list")
 
     # Summary
     logger.info("=" * 60)
