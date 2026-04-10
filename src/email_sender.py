@@ -15,6 +15,7 @@ Design decisions:
 import logging
 import os
 from datetime import datetime
+from html import escape
 from typing import Any
 
 import yaml
@@ -35,20 +36,35 @@ def load_config() -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _safe_url(url: str) -> str:
+    """
+    Return the URL only if it uses http(s). Falls back to '#'.
+
+    Prevents javascript: or data: URIs from being injected into href
+    attributes by external job sources.
+    """
+    if isinstance(url, str) and url.startswith(("https://", "http://")):
+        return url
+    return "#"
+
+
 def build_job_card(job: dict[str, Any]) -> str:
     """
     Build an HTML card for a single job listing.
 
     Uses inline CSS for email client compatibility.
+    All user-supplied fields are HTML-escaped to prevent injection.
     """
     score = job.get("ai_score", "?")
-    title = job.get("title", "Unknown")
-    company = job.get("company", "Unknown")
-    location = job.get("location", "Unknown")
-    summary = job.get("ai_summary", "")
-    url = job.get("url", "#")
-    source = job.get("source", "Unknown")
-    tough = job.get("ai_tough_match", False)
+    # FIX: escape all fields sourced from external APIs
+    title   = escape(str(job.get("title",   "Unknown")))
+    company = escape(str(job.get("company", "Unknown")))
+    location = escape(str(job.get("location", "Unknown")))
+    summary = escape(str(job.get("ai_summary", "")))
+    source  = escape(str(job.get("source",  "Unknown")))
+    # FIX: validate URL scheme before inserting into href
+    url     = _safe_url(job.get("url", "#"))
+    tough   = job.get("ai_tough_match", False)
 
     # Score color coding
     if isinstance(score, int):
@@ -66,7 +82,7 @@ def build_job_card(job: dict[str, Any]) -> str:
         tough_badge = (
             '<span style="background:#fef3c7;color:#92400e;'
             'padding:2px 8px;border-radius:4px;font-size:12px;'
-            'margin-left:8px;">⚠️ Degree/cert required</span>'
+            'margin-left:8px;">&#9888;&#65039; Degree/cert required</span>'
         )
 
     return f"""
@@ -78,24 +94,24 @@ def build_job_card(job: dict[str, Any]) -> str:
                          display:inline-flex;align-items:center;
                          justify-content:center;font-weight:bold;
                          font-size:14px;margin-right:12px;">
-                {score}
+                {escape(str(score))}
             </span>
             <div>
                 <strong style="font-size:16px;color:#1f2937;">{title}</strong>
                 {tough_badge}
                 <br/>
                 <span style="color:#6b7280;font-size:14px;">
-                    {company} · {location} · {source}
+                    {company} &middot; {location} &middot; {source}
                 </span>
             </div>
         </div>
         <p style="color:#374151;font-size:14px;line-height:1.5;
                   margin:8px 0;font-style:italic;">
-            "{summary}"
+            &ldquo;{summary}&rdquo;
         </p>
         <a href="{url}" style="color:#2563eb;font-size:14px;
                               text-decoration:none;font-weight:500;">
-            → Se annons ↗
+            &rarr; Se annons &#8599;
         </a>
     </div>
     """
@@ -105,15 +121,17 @@ def build_email_html(jobs: list[dict[str, Any]], config: dict[str, Any]) -> str:
     """
     Build the complete HTML email with all job sections.
 
-    Jobs are grouped by their AI flag (GOLD, SILVER, STRETCH)
-    and tough_match jobs get their own section at the bottom.
+    Jobs are grouped by their AI flag (GOLD, SILVER, STRETCH).
+    Jobs with tough_match=True get their own TOUGH section at the bottom
+    and are NOT duplicated in their tier section.
     """
     email_config = config.get("email", {})
     sections = email_config.get("sections", [])
 
     today = datetime.now().strftime("%A %d %B %Y")
 
-    # Group jobs by flag
+    # FIX: separate tough_match jobs into their own list so they don't
+    # appear twice (once in tier section + once in TOUGH section).
     grouped: dict[str, list[dict[str, Any]]] = {}
     tough_jobs: list[dict[str, Any]] = []
 
@@ -121,9 +139,11 @@ def build_email_html(jobs: list[dict[str, Any]], config: dict[str, Any]) -> str:
         flag = job.get("ai_flag", "SILVER")
         if job.get("ai_tough_match", False):
             tough_jobs.append(job)
-        if flag not in grouped:
-            grouped[flag] = []
-        grouped[flag].append(job)
+        else:
+            # Only add to tier group if NOT a tough-match job
+            if flag not in grouped:
+                grouped[flag] = []
+            grouped[flag].append(job)
 
     # Build sections HTML
     sections_html = ""
@@ -139,8 +159,8 @@ def build_email_html(jobs: list[dict[str, Any]], config: dict[str, Any]) -> str:
         if not section_jobs:
             continue
 
-        emoji = section.get("emoji", "📋")
-        heading = section.get("heading", flag)
+        emoji = escape(section.get("emoji", "📋"))
+        heading = escape(section.get("heading", flag))
 
         cards_html = "\n".join(build_job_card(job) for job in section_jobs)
 
@@ -159,8 +179,8 @@ def build_email_html(jobs: list[dict[str, Any]], config: dict[str, Any]) -> str:
         sections_html = """
         <div style="text-align:center;padding:40px;color:#6b7280;">
             <p style="font-size:18px;">Inga nya matchande jobb idag.</p>
-            <p>Systemet kollade alla tre källor men hittade inga
-               nya relevanta annonser sedan senaste körningen.</p>
+            <p>Systemet kollade alla tre k&auml;llor men hittade inga
+               nya relevanta annonser sedan senaste k&ouml;rningen.</p>
         </div>
         """
 
@@ -179,9 +199,9 @@ def build_email_html(jobs: list[dict[str, Any]], config: dict[str, Any]) -> str:
             <div style="background:linear-gradient(135deg,#1e3a5f,#2563eb);
                         color:white;padding:24px;border-radius:12px 12px 0 0;
                         text-align:center;">
-                <h1 style="margin:0;font-size:24px;">🔐 Jobbmatch</h1>
+                <h1 style="margin:0;font-size:24px;">&#128272; Jobbmatch</h1>
                 <p style="margin:8px 0 0;opacity:0.9;font-size:14px;">
-                    {today}
+                    {escape(today)}
                 </p>
                 <p style="margin:4px 0 0;opacity:0.7;font-size:12px;">
                     {len(jobs)} matchande jobb hittade
@@ -196,7 +216,7 @@ def build_email_html(jobs: list[dict[str, Any]], config: dict[str, Any]) -> str:
 
             <!-- Footer -->
             <div style="text-align:center;padding:16px;color:#9ca3af;font-size:12px;">
-                <p>Genererat av Job Hunter — AI-driven jobbmatchning</p>
+                <p>Genererat av Job Hunter &mdash; AI-driven jobbmatchning</p>
                 <p>Powered by Claude API + GitHub Actions</p>
             </div>
         </div>
