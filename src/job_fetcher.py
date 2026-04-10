@@ -250,7 +250,9 @@ def fetch_weworkremotely(config: dict[str, Any]) -> list[dict[str, Any]]:
                     continue
 
                 job_url = f"{base_url}{href}" if href.startswith("/") else href
-                job_id = f"wwr_{href.split('/')[-1]}"
+                # FIX: strip trailing slash before splitting so URLs like
+                # "/remote-jobs/foo/" don't produce an empty ID suffix.
+                job_id = f"wwr_{href.strip('/').split('/')[-1]}"
 
                 # Fetch job detail page for description
                 description = ""
