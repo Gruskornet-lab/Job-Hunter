@@ -14,7 +14,7 @@ name: Job Hunter — Daily Job Match
 
 on:
   schedule:
-    # Weekdays at 05:00 UTC ≈ 07:00 CET
+    # Mondays at 05:00 UTC ≈ 07:00 CET
     - cron: "0 5 * * 1"
 
   workflow_dispatch:
