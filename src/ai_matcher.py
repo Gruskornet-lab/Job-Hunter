@@ -1,44 +1,34 @@
 """
-Job Fetcher — Collects job listings from multiple sources.
-
-Sources:
-1. JobTech API (Swedish public employment service) — structured API
-2. Remotive.com API — remote jobs, structured API
-3. We Work Remotely — scraped HTML
+AI Matcher — Uses Claude API to score and classify job listings.
 
 Design decisions:
-- Each source has its own fetch function that normalizes data into
-  a common Job dict format: {id, title, company, location, url, description, source}.
-- Pre-filtering by keywords reduces the number of jobs sent to the
-  (rate-limited, paid) Claude API for matching.
-- Errors in one source don't block the others — each is wrapped in
-  try/except so partial results are still delivered.
+- Each job is sent individually to Claude for precise scoring.
+  Batching would be cheaper but risks lower-quality assessments.
+- The system prompt includes the full candidate profile context
+  from profile.yaml, so Claude understands the career-changer angle.
+- Rate limiting: 2-second delay between calls to stay well within
+  Anthropic's rate limits on the Sonnet tier.
+- Response validation: strict JSON parsing with fallback handling
+  for malformed responses.
 """
 
+import json
 import logging
-import re
+import os
+import time
 from typing import Any
-from urllib.parse import quote_plus
 
-import requests
+import anthropic
 import yaml
-from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# Shared HTTP session for connection pooling
-SESSION = requests.Session()
-SESSION.headers.update({
-    "User-Agent": "JobHunter/1.0 (career-automation-project)"
-})
-
-# Request timeout in seconds
-TIMEOUT = 30
+# Delay between API calls (seconds) — respects rate limits
+API_CALL_DELAY = 2
 
 
 def load_config() -> dict[str, Any]:
     """Load profile configuration from YAML."""
-    import os
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "config",
@@ -48,281 +38,242 @@ def load_config() -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def get_search_keywords(config: dict[str, Any]) -> list[str]:
+def build_system_prompt(config: dict[str, Any]) -> str:
     """
-    Extract all unique keywords from job priority tiers.
+    Build the system prompt for Claude's matching assessment.
 
-    These are used to query APIs that support keyword search,
-    reducing irrelevant results before AI matching.
+    Injects the full candidate profile so Claude has context about
+    the career change, practical experience, and job tier priorities.
     """
-    keywords = set()
-    for tier in ["gold", "silver", "bronze"]:
-        tier_config = config.get("job_priorities", {}).get(tier, {})
-        for kw in tier_config.get("keywords", []):
-            keywords.add(kw.lower())
-    return list(keywords)
+    candidate = config.get("candidate", {})
+    priorities = config.get("job_priorities", {})
+    matching_context = config.get("ai", {}).get("matching_context", "")
+
+    # Format learning platforms and skills
+    learning_lines = []
+    for platform in candidate.get("current_learning", []):
+        skills = ", ".join(platform.get("skills", []))
+        ptype = platform.get("type", "Learning")
+        learning_lines.append(f"  - {platform['platform']} ({ptype}): {skills}")
+
+    # Format automation projects
+    project_lines = []
+    for project in candidate.get("automation_projects", []):
+        project_lines.append(f"  - {project['name']} ({project['stack']})")
+
+    system_prompt = f"""You are a job matching AI for a career changer.
+
+CANDIDATE PROFILE:
+- Name: {candidate.get('name', 'Unknown')}
+- Background: {candidate.get('background', '')}
+- Short-term goal: {candidate.get('goals', {}).get('short_term', '')}
+- Long-term goal: {candidate.get('goals', {}).get('long_term', '')}
+- Technical skills: {', '.join(candidate.get('technical_skills', []))}
+- Current learning:
+{chr(10).join(learning_lines)}
+- Automation projects built:
+{chr(10).join(project_lines)}
+
+MATCHING CONTEXT:
+{matching_context}
+
+JOB CLASSIFICATION TIERS:
+- GOLD: {priorities.get('gold', {}).get('label', 'IT Security')} roles
+- SILVER: {priorities.get('silver', {}).get('label', 'IT General')} roles
+- STRETCH: {priorities.get('bronze', {}).get('label', 'Pentesting')} roles (include even if requirements are high)
+- SKIP: Non-IT roles (do not include)
+
+RESPONSE FORMAT:
+You MUST respond with ONLY a valid JSON object, no markdown, no explanation:
+{{
+  "score": <1-10 integer>,
+  "summary": "<2-3 sentences explaining why this job matches or doesn't>",
+  "flag": "GOLD" | "SILVER" | "STRETCH" | "SKIP",
+  "tough_match": <true if formal degree/certification is strictly required, false otherwise>
+}}
+
+SCORING GUIDE:
+- 8-10: Strong match, candidate should apply
+- 6-7: Decent match, worth considering
+- 4-5: Partial match, some relevant aspects
+- 1-3: Poor match or non-IT role
+"""
+    return system_prompt
 
 
-# ═══════════════════════════════════════
-# Source 1: JobTech API (Swedish jobs)
-# ═══════════════════════════════════════
-
-def fetch_jobtech(config: dict[str, Any]) -> list[dict[str, Any]]:
+def match_single_job(
+    client: anthropic.Anthropic,
+    job: dict[str, Any],
+    system_prompt: str,
+    model: str,
+) -> dict[str, Any] | None:
     """
-    Fetch jobs from the Swedish JobTech (Arbetsförmedlingen) API.
+    Send a single job to Claude for matching assessment.
 
-    The API supports free-text search and geographic filtering.
-    We run one query per keyword group to maximize coverage.
+    Returns the parsed JSON response or None if the call fails.
     """
-    source_config = config.get("sources", {}).get("jobtech", {})
-    if not source_config.get("enabled", False):
-        logger.info("JobTech source is disabled, skipping.")
-        return []
+    # Build the job description for Claude
+    job_text = f"""EVALUATE THIS JOB LISTING:
 
-    base_url = source_config["base_url"]
-    jobs = []
-    seen_ids = set()
+Title: {job.get('title', 'Unknown')}
+Company: {job.get('company', 'Unknown')}
+Location: {job.get('location', 'Unknown')}
+Source: {job.get('source', 'Unknown')}
 
-    # Group keywords into broader search queries to reduce API calls
-    search_terms = [
-        "cybersecurity OR SOC OR security analyst",
-        "penetration test OR pentest OR red team",
-        "devops OR sysadmin OR automation engineer",
-        "IT support OR cloud engineer OR infrastructure",
-    ]
+Description:
+{job.get('description', 'No description available')[:3000]}
+"""
 
-    for query in search_terms:
-        try:
-            params = {
-                "q": query,
-                "limit": 50,
-                "offset": 0,
-            }
-
-            response = SESSION.get(
-                f"{base_url}/search",
-                params=params,
-                timeout=TIMEOUT,
-            )
-            response.raise_for_status()
-            data = response.json()
-
-            for hit in data.get("hits", []):
-                job_id = f"jobtech_{hit.get('id', '')}"
-                if job_id in seen_ids:
-                    continue
-                seen_ids.add(job_id)
-
-                # Extract location from workplace address
-                workplace = hit.get("workplace_address", {}) or {}
-                location = workplace.get("municipality", "Sweden")
-
-                jobs.append({
-                    "id": job_id,
-                    "title": hit.get("headline", "Unknown"),
-                    "company": hit.get("employer", {}).get("name", "Unknown"),
-                    "location": location,
-                    "url": hit.get("webpage_url", hit.get("application_details", {}).get("url", "")),
-                    "description": hit.get("description", {}).get("text", "")[:2000],
-                    "source": "JobTech",
-                })
-
-            logger.info(f"JobTech query '{query}': found {len(data.get('hits', []))} hits")
-
-        except requests.RequestException as e:
-            logger.error(f"JobTech query '{query}' failed: {e}")
-            continue
-
-    logger.info(f"JobTech total: {len(jobs)} unique jobs")
-    return jobs
-
-
-# ═══════════════════════════════════════
-# Source 2: Remotive API (Remote jobs)
-# ═══════════════════════════════════════
-
-def fetch_remotive(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Fetch remote jobs from the Remotive.com API.
-
-    The API returns all jobs in one call; we filter client-side
-    using our keyword list since there's no search parameter.
-    """
-    source_config = config.get("sources", {}).get("remotive", {})
-    if not source_config.get("enabled", False):
-        logger.info("Remotive source is disabled, skipping.")
-        return []
-
-    base_url = source_config["base_url"]
-    jobs = []
-    keywords = get_search_keywords(config)
+    # FIX: declare raw_text before the try block so it is always defined
+    # if the except json.JSONDecodeError branch tries to log it.
+    raw_text = "<not yet received>"
 
     try:
-        response = SESSION.get(base_url, timeout=TIMEOUT)
-        response.raise_for_status()
-        data = response.json()
+        response = client.messages.create(
+            model=model,
+            max_tokens=500,
+            system=system_prompt,
+            messages=[{"role": "user", "content": job_text}],
+        )
 
-        for listing in data.get("jobs", []):
-            # Pre-filter: check if title or tags contain any of our keywords
-            title_lower = listing.get("title", "").lower()
-            tags = [t.lower() for t in listing.get("tags", [])]
-            combined_text = f"{title_lower} {' '.join(tags)}"
+        # Extract text response
+        raw_text = response.content[0].text.strip()
 
-            if not any(kw in combined_text for kw in keywords):
-                continue
+        # Clean markdown code fences if present
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[-1]
+            raw_text = raw_text.rsplit("```", 1)[0].strip()
 
-            # Strip HTML from description
-            raw_desc = listing.get("description", "")
-            clean_desc = BeautifulSoup(raw_desc, "html.parser").get_text(separator=" ")[:2000]
+        result = json.loads(raw_text)
 
-            job_id = f"remotive_{listing.get('id', '')}"
-            location = listing.get("candidate_required_location", "Remote")
+        # Validate required fields
+        required_fields = {"score", "summary", "flag"}
+        if not required_fields.issubset(result.keys()):
+            logger.warning(f"Missing fields in response for '{job['title']}': {result}")
+            return None
 
-            jobs.append({
-                "id": job_id,
-                "title": listing.get("title", "Unknown"),
-                "company": listing.get("company_name", "Unknown"),
-                "location": location if location else "Remote",
-                "url": listing.get("url", ""),
-                "description": clean_desc,
-                "source": "Remotive",
-            })
-
-        logger.info(f"Remotive: {len(jobs)} relevant jobs after keyword filter")
-
-    except requests.RequestException as e:
-        logger.error(f"Remotive fetch failed: {e}")
-
-    return jobs
-
-
-# ═══════════════════════════════════════
-# Source 3: We Work Remotely (Scraped)
-# ═══════════════════════════════════════
-
-def fetch_weworkremotely(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """
-    Scrape job listings from We Work Remotely.
-
-    We scrape category listing pages and extract job cards.
-    Descriptions are fetched from individual job pages.
-    Limited to 10 detail-page fetches per category to be respectful.
-    """
-    source_config = config.get("sources", {}).get("weworkremotely", {})
-    if not source_config.get("enabled", False):
-        logger.info("WeWorkRemotely source is disabled, skipping.")
-        return []
-
-    base_url = source_config["base_url"]
-    categories = source_config.get("scrape_categories", [])
-    keywords = get_search_keywords(config)
-    jobs = []
-
-    for category in categories:
+        # FIX: coerce score to int — Claude may return a string or float
         try:
-            url = f"{base_url}/categories/{category}"
-            response = SESSION.get(url, timeout=TIMEOUT)
-            response.raise_for_status()
+            result["score"] = int(result["score"])
+        except (TypeError, ValueError):
+            logger.warning(
+                f"Invalid score type for '{job['title']}': {result['score']!r} — defaulting to 0"
+            )
+            result["score"] = 0
 
-            soup = BeautifulSoup(response.text, "html.parser")
-            job_links = soup.select("li.feature a, li:not(.ad) a[href*='/remote-jobs/']")
+        # Clamp score to valid range
+        result["score"] = max(1, min(10, result["score"]))
 
-            fetched_count = 0
-            for link in job_links:
-                if fetched_count >= 10:
-                    break
+        # Normalize flag value
+        result["flag"] = result["flag"].upper()
+        if result["flag"] not in {"GOLD", "SILVER", "STRETCH", "SKIP"}:
+            result["flag"] = "SILVER"  # Default to SILVER for ambiguous flags
 
-                href = link.get("href", "")
-                if not href or "/remote-jobs/" not in href:
-                    continue
+        # Ensure tough_match exists
+        result.setdefault("tough_match", False)
 
-                title_el = link.select_one(".title")
-                company_el = link.select_one(".company")
+        return result
 
-                if not title_el:
-                    continue
-
-                title = title_el.get_text(strip=True)
-                company = company_el.get_text(strip=True) if company_el else "Unknown"
-
-                # Pre-filter by keywords
-                if not any(kw in title.lower() for kw in keywords):
-                    continue
-
-                job_url = f"{base_url}{href}" if href.startswith("/") else href
-                # FIX: strip trailing slash before splitting so URLs like
-                # "/remote-jobs/foo/" don't produce an empty ID suffix.
-                job_id = f"wwr_{href.strip('/').split('/')[-1]}"
-
-                # Fetch job detail page for description
-                description = ""
-                try:
-                    detail_resp = SESSION.get(job_url, timeout=TIMEOUT)
-                    detail_resp.raise_for_status()
-                    detail_soup = BeautifulSoup(detail_resp.text, "html.parser")
-                    listing_container = detail_soup.select_one(".listing-container")
-                    if listing_container:
-                        description = listing_container.get_text(separator=" ", strip=True)[:2000]
-                    fetched_count += 1
-                except requests.RequestException:
-                    pass
-
-                jobs.append({
-                    "id": job_id,
-                    "title": title,
-                    "company": company,
-                    "location": "Remote",
-                    "url": job_url,
-                    "description": description,
-                    "source": "WeWorkRemotely",
-                })
-
-            logger.info(f"WWR category '{category}': {fetched_count} jobs fetched")
-
-        except requests.RequestException as e:
-            logger.error(f"WWR category '{category}' failed: {e}")
-            continue
-
-    logger.info(f"WeWorkRemotely total: {len(jobs)} jobs")
-    return jobs
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON for '{job['title']}': {e}")
+        logger.debug(f"Raw response: {raw_text!r}")
+        return None
+    except anthropic.APIError as e:
+        logger.error(f"Claude API error for '{job['title']}': {e}")
+        return None
 
 
-# ═══════════════════════════════════════
-# Main entry point
-# ═══════════════════════════════════════
-
-def fetch_all_jobs() -> list[dict[str, Any]]:
+def match_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Fetch jobs from all enabled sources.
+    Score and classify all jobs using Claude API.
 
-    Returns a combined list of normalized job dicts.
-    Each source is independent — if one fails, the others
-    still contribute results.
+    Args:
+        jobs: List of normalized job dicts from job_fetcher.
+
+    Returns:
+        List of jobs enriched with AI matching data (score, flag, summary).
+        Jobs flagged as SKIP are excluded from the result.
     """
     config = load_config()
+    ai_config = config.get("ai", {})
+    model = ai_config.get("model", "claude-sonnet-4-6")
+    score_threshold = ai_config.get("score_threshold", 4)
+    max_jobs = ai_config.get("max_jobs_per_run", 50)
 
-    all_jobs = []
+    # Initialize Anthropic client (uses ANTHROPIC_API_KEY env var)
+    client = anthropic.Anthropic()
 
-    # Fetch from each source independently
-    for fetcher, name in [
-        (fetch_jobtech, "JobTech"),
-        (fetch_remotive, "Remotive"),
-        (fetch_weworkremotely, "WeWorkRemotely"),
-    ]:
-        try:
-            jobs = fetcher(config)
-            all_jobs.extend(jobs)
-        except Exception as e:
-            logger.error(f"Unexpected error in {name} fetcher: {e}")
+    system_prompt = build_system_prompt(config)
+
+    matched_jobs = []
+    processed = 0
+
+    for job in jobs[:max_jobs]:
+        logger.info(f"Matching [{processed + 1}/{min(len(jobs), max_jobs)}]: {job['title']}")
+
+        result = match_single_job(client, job, system_prompt, model)
+
+        if result is None:
+            logger.warning(f"Skipping '{job['title']}' — no valid AI response")
+            processed += 1
+            time.sleep(API_CALL_DELAY)
             continue
 
-    logger.info(f"Total jobs fetched from all sources: {len(all_jobs)}")
-    return all_jobs
+        # Skip non-IT jobs
+        if result["flag"] == "SKIP":
+            logger.info(f"  → SKIP (score: {result['score']})")
+            processed += 1
+            time.sleep(API_CALL_DELAY)
+            continue
+
+        # Skip jobs below threshold (unless STRETCH — always include)
+        if result["score"] < score_threshold and result["flag"] != "STRETCH":
+            logger.info(f"  → Below threshold (score: {result['score']})")
+            processed += 1
+            time.sleep(API_CALL_DELAY)
+            continue
+
+        # Enrich job with AI data
+        job["ai_score"] = result["score"]
+        job["ai_summary"] = result["summary"]
+        job["ai_flag"] = result["flag"]
+        job["ai_tough_match"] = result.get("tough_match", False)
+
+        logger.info(f"  → {result['flag']} (score: {result['score']})")
+        matched_jobs.append(job)
+
+        processed += 1
+        time.sleep(API_CALL_DELAY)
+
+    # Sort by score descending within each flag category
+    matched_jobs.sort(key=lambda j: j.get("ai_score", 0), reverse=True)
+
+    logger.info(
+        f"Matching complete: {len(matched_jobs)} jobs passed "
+        f"(from {processed} evaluated)"
+    )
+    return matched_jobs
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    jobs = fetch_all_jobs()
-    for job in jobs[:5]:
-        print(f"[{job['source']}] {job['title']} — {job['company']} ({job['location']})")
-    print(f"\nTotal: {len(jobs)} jobs")
+    # Test with a sample job
+    test_job = {
+        "id": "test_001",
+        "title": "Junior SOC Analyst",
+        "company": "SecureCorp AB",
+        "location": "Göteborg",
+        "url": "https://example.com/job/123",
+        "description": (
+            "We are looking for a Junior SOC Analyst to join our security "
+            "operations center. You will monitor SIEM alerts, investigate "
+            "incidents, and help improve our detection capabilities. "
+            "Experience with Nmap, Wireshark, or similar tools is a plus. "
+            "No formal degree required — we value practical skills."
+        ),
+        "source": "Test",
+    }
+    results = match_jobs([test_job])
+    for job in results:
+        print(f"[{job['ai_flag']}] {job['ai_score']}/10 — {job['title']}")
+        print(f"  {job['ai_summary']}")
