@@ -124,6 +124,10 @@ Description:
 {job.get('description', 'No description available')[:3000]}
 """
 
+    # FIX: declare raw_text before the try block so it is always defined
+    # if the except json.JSONDecodeError branch tries to log it.
+    raw_text = "<not yet received>"
+
     try:
         response = client.messages.create(
             model=model,
@@ -148,6 +152,18 @@ Description:
             logger.warning(f"Missing fields in response for '{job['title']}': {result}")
             return None
 
+        # FIX: coerce score to int — Claude may return a string or float
+        try:
+            result["score"] = int(result["score"])
+        except (TypeError, ValueError):
+            logger.warning(
+                f"Invalid score type for '{job['title']}': {result['score']!r} — defaulting to 0"
+            )
+            result["score"] = 0
+
+        # Clamp score to valid range
+        result["score"] = max(1, min(10, result["score"]))
+
         # Normalize flag value
         result["flag"] = result["flag"].upper()
         if result["flag"] not in {"GOLD", "SILVER", "STRETCH", "SKIP"}:
@@ -160,7 +176,7 @@ Description:
 
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON for '{job['title']}': {e}")
-        logger.debug(f"Raw response: {raw_text}")
+        logger.debug(f"Raw response: {raw_text!r}")
         return None
     except anthropic.APIError as e:
         logger.error(f"Claude API error for '{job['title']}': {e}")
@@ -180,7 +196,7 @@ def match_jobs(jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     config = load_config()
     ai_config = config.get("ai", {})
-    model = ai_config.get("model", "claude-sonnet-4-20250514")
+    model = ai_config.get("model", "claude-sonnet-4-6")
     score_threshold = ai_config.get("score_threshold", 4)
     max_jobs = ai_config.get("max_jobs_per_run", 50)
 
