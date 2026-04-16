@@ -126,18 +126,44 @@ sources:
     enabled: true
     base_url: "https://jobsearch.api.jobtechdev.se"
     search_endpoint: "/search"
-    description: "Swedish public employment service API — free, no key"
+    description: "Arbetsförmedlingen/Platsbanken — official Swedish public job API, free, no key"
+
   remotive:
     enabled: true
     base_url: "https://remotive.com/api/remote-jobs"
-    description: "Remote jobs Europe + Global — free, no key"
+    description: "Remote jobs Europe + Global — free API, no key"
+
   weworkremotely:
     enabled: true
     base_url: "https://weworkremotely.com"
     scrape_categories:
       - "remote-jobs/devops-sysadmin"
       - "remote-jobs/programming"
-    description: "Global remote jobs — scraped"
+    description: "Global remote jobs — scraped HTML"
+
+  jobicy:
+    enabled: true
+    base_url: "https://jobicy.com/api/v2/remote-jobs"
+    description: "Remote IT/security jobs — free API, no key needed"
+
+  itjobb:
+    enabled: true
+    base_url: "https://www.itjobb.se"
+    description: "Swedish IT job aggregator — scraped HTML (selectors may need updating)"
+
+  teknikjobb:
+    enabled: true
+    base_url: "https://www.teknikjobb.se"
+    description: "Swedish engineering/tech jobs by Teknikföretagen — scraped HTML"
+
+  nyteknik:
+    enabled: true
+    base_url: "https://www.nyteknik.se"
+    description: "Ny Teknik magazine job board — scraped HTML"
+
+  # LinkedIn and Indeed are intentionally excluded:
+  # - LinkedIn: no public job listings API; scraping violates their terms of service
+  # - Indeed: Publisher API discontinued; scraping violates their terms of service
 
 # ═══════════════════════════════════════
 # AI matching settings
