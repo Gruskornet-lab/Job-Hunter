@@ -7,6 +7,8 @@
 
 candidate:
   name: "Gruskorn"
+  home_location: "Frillesås, Kungsbacka kommun, Halland"
+  commute_range: "Göteborg–Varberg-korridoren (max ~10 km söder om Varberg för plats/hybrid)"
   background: "Career changer from accounting (Redovisningsekonom) into IT security"
   current_learning:
     - platform: "TryHackMe"
@@ -100,22 +102,49 @@ job_priorities:
 # ═══════════════════════════════════════
 
 geography:
+  # Alla kommuner/städer inom pendlingsavstånd från Frillesås
+  # Göteborg i norr → ~10 km söder om Varberg i söder
   onsite_hybrid:
     - "Göteborg"
     - "Gothenburg"
-    - "Kungsbacka"
-    - "Varberg"
     - "Mölndal"
     - "Partille"
     - "Lerum"
-    - "Borås"
     - "Kungälv"
+    - "Härryda"
     - "Landvetter"
+    - "Kungsbacka"
+    - "Onsala"
+    - "Åsa"
+    - "Fjärås"
+    - "Anneberg"
+    - "Frillesås"
+    - "Varberg"
+    - "Tvååker"
+    - "Träslövsläge"
+    - "Borås"
+    - "Alingsås"
+    - "Västra Götaland"
+    - "Halland"
+  # Termer som indikerar remote — alltid OK oavsett plats
   remote:
-    - "Sweden"
-    - "Europe"
-    - "Global"
+    - "remote"
+    - "Remote"
+    - "REMOTE"
+    - "worldwide"
     - "Worldwide"
+    - "global"
+    - "Global"
+    - "europe"
+    - "Europe"
+    - "Sweden"
+    - "sweden"
+    - "hybrid"
+    - "Hybrid"
+    - "distans"
+    - "Distans"
+    - "Flexible"
+    - "flexible"
 
 # ═══════════════════════════════════════
 # Job source configuration
@@ -126,44 +155,29 @@ sources:
     enabled: true
     base_url: "https://jobsearch.api.jobtechdev.se"
     search_endpoint: "/search"
-    description: "Arbetsförmedlingen/Platsbanken — official Swedish public job API, free, no key"
-
+    description: "Swedish public employment service API — free, no key"
   remotive:
     enabled: true
     base_url: "https://remotive.com/api/remote-jobs"
-    description: "Remote jobs Europe + Global — free API, no key"
-
+    description: "Remote jobs Europe + Global — free, no key"
   weworkremotely:
     enabled: true
     base_url: "https://weworkremotely.com"
     scrape_categories:
       - "remote-jobs/devops-sysadmin"
       - "remote-jobs/programming"
-    description: "Global remote jobs — scraped HTML"
-
-  jobicy:
+    description: "Global remote jobs — scraped"
+  jobindex:
     enabled: true
-    base_url: "https://jobicy.com/api/v2/remote-jobs"
-    description: "Remote IT/security jobs — free API, no key needed"
-
-  itjobb:
-    enabled: true
-    base_url: "https://www.itjobb.se"
-    description: "Swedish IT job aggregator — scraped HTML (selectors may need updating)"
-
-  teknikjobb:
-    enabled: true
-    base_url: "https://www.teknikjobb.se"
-    description: "Swedish engineering/tech jobs by Teknikföretagen — scraped HTML"
-
-  nyteknik:
-    enabled: true
-    base_url: "https://www.nyteknik.se"
-    description: "Ny Teknik magazine job board — scraped HTML"
-
-  # LinkedIn and Indeed are intentionally excluded:
-  # - LinkedIn: no public job listings API; scraping violates their terms of service
-  # - Indeed: Publisher API discontinued; scraping violates their terms of service
+    base_url: "https://www.jobindex.se"
+    description: "Swedish job aggregator — scraped"
+    search_queries:
+      - "cybersecurity"
+      - "SOC analyst"
+      - "IT säkerhet"
+      - "penetrationstest"
+      - "sysadmin"
+      - "devops"
 
 # ═══════════════════════════════════════
 # AI matching settings
@@ -182,6 +196,15 @@ ai:
     - Automation projects (GitHub Actions, Python, APIs) demonstrate real engineering ability
     - Include pentesting jobs even if requirements are high — flag as STRETCH
     - Skip all non-IT jobs entirely (accounting, sales, admin, etc.)
+
+    GEOGRAPHIC CONSTRAINT (very important):
+    - Candidate lives in Frillesås (Kungsbacka municipality, Halland, Sweden)
+    - Remote jobs: always acceptable, any location worldwide
+    - Hybrid jobs: only acceptable if workplace is in Göteborg–Varberg corridor
+    - On-site jobs: only acceptable if within commuting distance:
+      Göteborg, Mölndal, Partille, Kungsbacka, Varberg, Härryda, Kungälv, Lerum, Borås (max)
+      or approximately 10 km south of Varberg
+    - On-site jobs in Stockholm, Malmö, or other distant cities: flag as location mismatch in summary
 
 # ═══════════════════════════════════════
 # Email settings

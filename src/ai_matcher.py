@@ -61,10 +61,15 @@ def build_system_prompt(config: dict[str, Any]) -> str:
     for project in candidate.get("automation_projects", []):
         project_lines.append(f"  - {project['name']} ({project['stack']})")
 
+    geo = config.get("geography", {})
+    allowed_cities = ", ".join(geo.get("onsite_hybrid", []))
+
     system_prompt = f"""You are a job matching AI for a career changer.
 
 CANDIDATE PROFILE:
 - Name: {candidate.get('name', 'Unknown')}
+- Home location: {candidate.get('home_location', 'Frillesås, Halland, Sweden')}
+- Commute range: {candidate.get('commute_range', 'Göteborg–Varberg corridor')}
 - Background: {candidate.get('background', '')}
 - Short-term goal: {candidate.get('goals', {}).get('short_term', '')}
 - Long-term goal: {candidate.get('goals', {}).get('long_term', '')}
@@ -77,17 +82,20 @@ CANDIDATE PROFILE:
 MATCHING CONTEXT:
 {matching_context}
 
+ALLOWED LOCATIONS FOR ON-SITE/HYBRID:
+{allowed_cities}
+
 JOB CLASSIFICATION TIERS:
 - GOLD: {priorities.get('gold', {}).get('label', 'IT Security')} roles
 - SILVER: {priorities.get('silver', {}).get('label', 'IT General')} roles
 - STRETCH: {priorities.get('bronze', {}).get('label', 'Pentesting')} roles (include even if requirements are high)
-- SKIP: Non-IT roles (do not include)
+- SKIP: Non-IT roles OR on-site/hybrid jobs outside the allowed location list above
 
 RESPONSE FORMAT:
 You MUST respond with ONLY a valid JSON object, no markdown, no explanation:
 {{
   "score": <1-10 integer>,
-  "summary": "<2-3 sentences explaining why this job matches or doesn't>",
+  "summary": "<2-3 sentences explaining why this job matches or doesn't, mention location if relevant>",
   "flag": "GOLD" | "SILVER" | "STRETCH" | "SKIP",
   "tough_match": <true if formal degree/certification is strictly required, false otherwise>
 }}
@@ -96,7 +104,7 @@ SCORING GUIDE:
 - 8-10: Strong match, candidate should apply
 - 6-7: Decent match, worth considering
 - 4-5: Partial match, some relevant aspects
-- 1-3: Poor match or non-IT role
+- 1-3: Poor match, non-IT role, or wrong location for on-site work
 """
     return system_prompt
 
